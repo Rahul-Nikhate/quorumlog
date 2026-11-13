@@ -1,0 +1,55 @@
+# Three real QuorumLog nodes, one per container (not demo mode).
+#
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#   open http://localhost:8081   (node 1; 8082 = node 2, 8083 = node 3)
+#
+# Raft traffic stays on the compose network (port 7001 inside each
+# container), and followers forward writes to the leader over the same network
+# (--http-peers, port 8080 inside each container). Only the HTTP
+# API/dashboard ports are published. Each node keeps
+# its log in a named volume, so `docker compose stop qlogd2` followed by
+# `docker compose start qlogd2` restarts node 2 with its data.
+
+x-qlogd: &qlogd
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  image: quorumlog:local
+  restart: unless-stopped
+  stop_grace_period: 10s
+
+services:
+  qlogd1:
+    <<: *qlogd
+    hostname: qlogd1
+    command: ["--id", "1", "--peers", "1=qlogd1:7001,2=qlogd2:7001,3=qlogd3:7001",
+              "--http-peers", "1=qlogd1:8080,2=qlogd2:8080,3=qlogd3:8080",
+              "--raft-addr", "0.0.0.0:7001", "--http-addr", "0.0.0.0:8080",
+              "--data-dir", "/data", "--fsync", "always"]
+    ports: ["8081:8080"]
+    volumes: ["qlog1:/data"]
+
+  qlogd2:
+    <<: *qlogd
+    hostname: qlogd2
+    command: ["--id", "2", "--peers", "1=qlogd1:7001,2=qlogd2:7001,3=qlogd3:7001",
+              "--http-peers", "1=qlogd1:8080,2=qlogd2:8080,3=qlogd3:8080",
+              "--raft-addr", "0.0.0.0:7001", "--http-addr", "0.0.0.0:8080",
+              "--data-dir", "/data", "--fsync", "always"]
+    ports: ["8082:8080"]
+    volumes: ["qlog2:/data"]
+
+  qlogd3:
+    <<: *qlogd
+    hostname: qlogd3
+    command: ["--id", "3", "--peers", "1=qlogd1:7001,2=qlogd2:7001,3=qlogd3:7001",
+              "--http-peers", "1=qlogd1:8080,2=qlogd2:8080,3=qlogd3:8080",
+              "--raft-addr", "0.0.0.0:7001", "--http-addr", "0.0.0.0:8080",
+              "--data-dir", "/data", "--fsync", "always"]
+    ports: ["8083:8080"]
+    volumes: ["qlog3:/data"]
+
+volumes:
+  qlog1:
+  qlog2:
+  qlog3:

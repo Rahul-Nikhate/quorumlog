@@ -1,0 +1,13 @@
+# binaries
+/qlogd
+/qlog
+*.test
+*.out
+# local data / profiles
+/data/
+*.prof
+coverage.*
+# editors / OS
+.DS_Store
+.idea/
+.vscode/

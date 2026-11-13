@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: gofmt, vet, test -race, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test -race
+        run: go test -race -count=1 -timeout 15m ./...
+
+      - name: go build
+        run: go build -trimpath ./...
+
+  docker:
+    name: docker build (no push)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: docker build
+        run: docker build -t quorumlog:ci .
+
+      - name: smoke test (demo mode answers /v1/health)
+        run: |
+          docker run -d --name qlog -p 8080:8080 quorumlog:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/v1/health; then echo; docker rm -f qlog; exit 0; fi
+            sleep 1
+          done
+          docker logs qlog
+          exit 1

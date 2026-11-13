@@ -1,0 +1,21 @@
+# Keep the build context small and free of local state.
+.git
+.github
+.gitignore
+.dockerignore
+Dockerfile
+deploy/
+docs/
+*.md
+**/*.test
+**/*.out
+**/*.prof
+coverage*
+bin/
+dist/
+data/
+tmp/
+.idea/
+.vscode/
+.DS_Store
+.playwright-mcp/

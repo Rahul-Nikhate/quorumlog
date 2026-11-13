@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>QuorumLog Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='7' r='5' fill='%232f6fdf'/%3E%3Ccircle cx='7' cy='24' r='5' fill='%232f6fdf'/%3E%3Ccircle cx='25' cy='24' r='5' fill='%232f6fdf'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+  <div class="brand">
+    <h1>QuorumLog</h1>
+    <p class="tagline">3-node Raft-replicated message queue</p>
+  </div>
+  <div class="conn" role="status" aria-live="polite">
+    <span id="conn-dot" class="dot dot-unknown" aria-hidden="true"></span>
+    <span id="conn-text">Connecting…</span>
+    <span id="demo-badge" class="badge" hidden>demo mode</span>
+  </div>
+</header>
+
+<div id="banner" class="banner" role="alert" hidden></div>
+
+<main id="main" class="grid">
+
+  <!-- Guided demo -->
+  <section class="card span-all" aria-labelledby="guide-h">
+    <details id="guide" open>
+      <summary><h2 id="guide-h">Guided demo: kill the leader, lose nothing</h2></summary>
+      <p class="muted">Run the steps in order. Each button does one thing and tells you what happened.
+        The dashboard remembers every message the cluster acknowledged, so step 7 can check that none were lost.</p>
+      <div class="row">
+        <label for="guide-topic">Topic</label>
+        <input id="guide-topic" type="text" value="demo-orders" autocomplete="off" spellcheck="false" pattern="[A-Za-z0-9._\-]+" required>
+        <label for="guide-count">Messages per step</label>
+        <input id="guide-count" type="number" min="1" max="500" value="20">
+      </div>
+      <ol class="steps">
+        <li id="step-1"><div class="step-head"><button type="button" data-step="1">1. Create topic</button><span class="step-status" aria-live="polite"></span></div>
+          <p class="muted">Creates the topic through the replicated <code>__meta</code> group; every node opens a Raft group for it.</p></li>
+        <li id="step-2"><div class="step-head"><button type="button" data-step="2">2. Produce (acks=all)</button><span class="step-status" aria-live="polite"></span></div>
+          <p class="muted">Each message is acknowledged only after a majority (2 of 3) has it in its log.</p></li>
+        <li id="step-3"><div class="step-head"><button type="button" data-step="3">3. Kill the leader</button><span class="step-status" aria-live="polite"></span></div>
+          <p class="muted demo-only">Stops the node that leads the topic's group. Its data directory is kept.</p>
+          <p class="muted non-demo-only">Not in demo mode: stop the leader yourself, e.g. <code>docker compose stop qlogd2</code>. The dashboard watches for the change.</p></li>
+        <li id="step-4"><div class="step-head"><button type="button" data-step="4">4. Watch the new election</button><span class="step-status" aria-live="polite"></span></div>
+          <p class="muted">Waits until the surviving nodes elect a leader with a higher term (see the event feed).</p></li>
+        <li id="step-5"><div class="step-head"><button type="button" data-step="5">5. Produce again</button><span class="step-status" aria-live="polite"></span></div>
+          <p class="muted">Two of three nodes are still a majority, so writes keep working.</p></li>
+        <li id="step-6"><div class="step-head"><button type="button" data-step="6">6. Restart the node and watch it catch up</button><span class="step-status" aria-live="polite"></span></div>
+          <p class="muted">The restarted node recovers its log from disk, then the leader sends it what it missed.</p></li>
+        <li id="step-7"><div class="step-head"><button type="button" data-step="7">7. Verify nothing was lost</button><span class="step-status" aria-live="polite"></span></div>
+          <p class="muted">Reads the topic from offset 0 and compares it with every message the cluster acknowledged.</p></li>
+      </ol>
+    </details>
+  </section>
+
+  <!-- Cluster -->
+  <section class="card span-2" aria-labelledby="cluster-h">
+    <div class="card-head">
+      <h2 id="cluster-h">Cluster</h2>
+      <span class="muted small" id="cluster-meta">–</span>
+    </div>
+    <ul id="nodes" class="nodes" aria-label="Nodes"></ul>
+    <p id="cluster-result" class="result" aria-live="polite"></p>
+    <div class="row small">
+      <input id="show-internal" type="checkbox" checked>
+      <label for="show-internal">Show internal groups (<code>__meta</code>, <code>__offsets</code>)</label>
+    </div>
+    <div class="table-wrap">
+      <table id="groups">
+        <caption class="sr-only">Raft groups: role, leader, term and offsets per replica</caption>
+        <thead><tr>
+          <th scope="col">Group</th><th scope="col">Node</th><th scope="col">Role</th><th scope="col">Leader</th>
+          <th scope="col" class="num">Term</th><th scope="col" class="num">Commit</th>
+          <th scope="col" class="num" title="High watermark: next offset after the last committed message">HW</th>
+          <th scope="col" class="num" title="Log end offset: next offset to be written in this replica's log">LEO</th>
+          <th scope="col" class="num" title="How far this replica's LEO trails the leader's">Behind</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Events -->
+  <section class="card" aria-labelledby="events-h">
+    <div class="card-head">
+      <h2 id="events-h">Events</h2>
+      <button type="button" id="events-clear" class="link">Clear</button>
+    </div>
+    <ol id="events" class="events" aria-live="polite" aria-relevant="additions"></ol>
+    <p class="muted small">From <code>/v1/cluster</code>. Rows marked <em>dashboard</em> are leader changes this page observed between polls.</p>
+  </section>
+
+  <!-- Topics -->
+  <section class="card" aria-labelledby="topics-h">
+    <h2 id="topics-h">Topics</h2>
+    <form id="topic-form" class="row">
+      <label for="topic-name" class="sr-only">New topic name</label>
+      <input id="topic-name" type="text" placeholder="orders" autocomplete="off" spellcheck="false" pattern="[A-Za-z0-9._\-]+" required>
+      <button type="submit">Create</button>
+    </form>
+    <p id="topic-result" class="result" aria-live="polite"></p>
+    <p class="small muted" id="active-topic-label">Active topic: <strong id="active-topic">none</strong></p>
+    <ul id="topics" class="topics" aria-label="Topics (select one to make it active)"></ul>
+  </section>
+
+  <!-- Produce -->
+  <section class="card" aria-labelledby="produce-h">
+    <h2 id="produce-h">Produce <span class="muted small">to <span class="active-topic-name">–</span></span></h2>
+    <form id="produce-form" class="stack">
+      <div class="field"><label for="p-key">Key <span class="muted">(optional)</span></label>
+        <input id="p-key" type="text" autocomplete="off" spellcheck="false"></div>
+      <div class="field"><label for="p-value">Value <span class="muted">(<code>{n}</code> is replaced by a counter)</span></label>
+        <input id="p-value" type="text" value="hello {n}" autocomplete="off" spellcheck="false"></div>
+      <div class="row">
+        <div class="field"><label for="p-count">Messages</label>
+          <input id="p-count" type="number" min="1" max="1000" value="1"></div>
+        <div class="field"><label for="p-acks">Acks</label>
+          <select id="p-acks">
+            <option value="all" selected>all (majority committed)</option>
+            <option value="leader">leader (leader's log only)</option>
+          </select></div>
+      </div>
+      <fieldset>
+        <legend>Idempotent producer <span class="muted">(optional)</span></legend>
+        <div class="row">
+          <div class="field"><label for="p-pid">Producer id</label>
+            <input id="p-pid" type="text" placeholder="p-1" autocomplete="off" spellcheck="false"></div>
+          <div class="field"><label for="p-seq">Sequence</label>
+            <input id="p-seq" type="number" min="0" value="0"></div>
+        </div>
+        <p class="small muted">After a success the sequence advances by the number of messages sent.
+          "Retry last" resends the identical request; the cluster should answer <code>duplicate: true</code>.</p>
+      </fieldset>
+      <div class="row">
+        <button type="submit">Send</button>
+        <button type="button" id="p-retry" disabled>Retry last</button>
+      </div>
+    </form>
+    <p id="produce-result" class="result" aria-live="polite"></p>
+  </section>
+
+  <!-- Consumer groups -->
+  <section class="card" aria-labelledby="offsets-h">
+    <h2 id="offsets-h">Consumer group offsets <span class="muted small">for <span class="active-topic-name">–</span></span></h2>
+    <form id="offset-form" class="stack">
+      <div class="row">
+        <div class="field"><label for="o-group">Group</label>
+          <input id="o-group" type="text" value="dashboard" autocomplete="off" spellcheck="false" required></div>
+        <div class="field"><label for="o-offset">Offset</label>
+          <input id="o-offset" type="number" min="0" value="0"></div>
+      </div>
+      <div class="row">
+        <button type="submit">Commit</button>
+        <button type="button" id="o-fetch">Fetch</button>
+        <button type="button" id="o-from-tail" class="link">Use tail position</button>
+      </div>
+    </form>
+    <p id="offset-result" class="result" aria-live="polite"></p>
+    <p class="small muted">Committed offsets are replicated through the <code>__offsets</code> Raft group. The convention is "next offset to read".</p>
+  </section>
+
+  <!-- Tail -->
+  <section class="card span-all" aria-labelledby="tail-h">
+    <div class="card-head">
+      <h2 id="tail-h">Live tail <span class="muted small">of <span class="active-topic-name">–</span></span></h2>
+      <span class="muted small" id="tail-meta">stopped</span>
+    </div>
+    <div class="row">
+      <label for="tail-from">Start at</label>
+      <select id="tail-from">
+        <option value="begin">offset 0</option>
+        <option value="end" selected>end (new messages only)</option>
+      </select>
+      <button type="button" id="tail-toggle" aria-pressed="false">Start tail</button>
+      <button type="button" id="tail-clear" class="link">Clear</button>
+    </div>
+    <p id="tail-result" class="result" aria-live="polite"></p>
+    <div class="table-wrap tail-wrap">
+      <table id="tail">
+        <caption class="sr-only">Messages received by long-polling the topic, newest first</caption>
+        <thead><tr><th scope="col" class="num">Offset</th><th scope="col">Key</th><th scope="col">Value</th><th scope="col">Timestamp</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="small muted">Uses <code>GET /v1/topics/{topic}/messages?wait_ms=…</code>: the server holds the request open until a new message is committed or the wait expires.</p>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <p>QuorumLog: Raft over TCP, a segmented log on disk, HTTP/JSON API on every node.
+    <a href="/metrics">/metrics</a> · <a href="/v1/cluster">/v1/cluster</a></p>
+  <p class="muted small">Hosted demo on a free instance: the demo data resets when the free instance restarts or spins down after being idle.</p>
+</footer>
+</body>
+</html>

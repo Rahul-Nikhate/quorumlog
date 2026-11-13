@@ -1,0 +1,18 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# One free web service running `qlogd --demo` (3 Raft nodes in one process).
+# Free tier: no persistent disk (the filesystem is ephemeral) and the service
+# spins down after 15 minutes without traffic, so demo data resets.
+services:
+  - type: web
+    name: quorumlog
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /v1/health
+    autoDeployTrigger: commit
+    envVars:
+      # Render sets PORT=10000 by default; pin it to the port the image
+      # exposes. qlogd --demo listens on 0.0.0.0:$PORT.
+      - key: PORT
+        value: "8080"
