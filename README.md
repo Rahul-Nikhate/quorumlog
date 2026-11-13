@@ -9,8 +9,8 @@ without losing acknowledged messages.**
 <!-- Replace with a recording of the guided demo (kill leader → election → catch-up → verify). -->
 ![Dashboard demo: killing the leader and watching a new election](docs/demo.gif)
 
-**Live demo:** _coming soon: `https://<your-service>.onrender.com` (free instance; the first request after idling
-takes about a minute, and demo data resets on restart)._
+**Live demo:** **[quorumlog.onrender.com](https://quorumlog.onrender.com)**. Open it and run the Guided demo. (It runs
+on a free instance, so the first request after idling takes about a minute, and demo data resets on restart.)
 
 Raft (elections, replication, snapshots, ReadIndex) and the segmented on-disk log are written from scratch. The only
 module dependencies are `golang.org/x/sys` plus test-only libraries.
